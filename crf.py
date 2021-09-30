@@ -1,12 +1,37 @@
-import autograd.numpy as np
+import numpy as np
 from autograd import grad
 import math
 from functools import reduce
+from conllu.models import TokenList, Token
+from conllu import parse_incr
 
+data_train_file = open("UD_English-EWT/en_ewt-ud-train.conllu", "r", encoding="utf-8")
 
-types = ['BOS', 'Arya', 'is', 'a', 'nice', 'kitty', '!', 'EOS']
+train_X = []
+train_Y = []
+
+for tokenlist in parse_incr(data_train_file):
+	X = []
+	Y = []
+	X.append("BOS")
+	Y.append("BOS")
+	for token in tokenlist:
+		X.append(token['form'])
+		Y.append(token['xpostag'])
+	X.append("")
+	Y.append("")
+	train_X.append(X)
+	train_Y.append(Y)
+	break
+
+print(train_X)
+print(train_Y)
+exit()
+	
+	
+types = ['BOS', 'Arya', 'is', 'a', 'nice', 'kitty', '!', '']
 sentence = types
-pos = ['BOS', 'Proper Noun', 'Verb', 'Article', 'Adjective', 'Noun', 'Punctuation',  'EOS']
+pos = ['BOS', 'Proper Noun', 'Verb', 'Article', 'Adjective', 'Noun', 'Punctuation', '']
 labels = pos
 
 num_types = len(types)
@@ -18,12 +43,12 @@ pos_encoded = {pos[i]:i for i in range(num_pos)}
 
 # pos to pos
 #lamda = np.zeros((num_pos*num_pos))
-lamda = np.random.rand(num_pos*num_pos) * 0.1
+lamda_in = np.random.rand(num_pos*num_pos) * 0.1
 #print(lamda)
 
 # type to pos
 #mu = np.zeros((num_types*num_pos))
-mu = np.random.rand(num_types*num_pos) * 0.1
+mu_in = np.random.rand(num_types*num_pos) * 0.1
 #print(mu)
 
 # transitions matrix
@@ -55,7 +80,10 @@ def p(sentence, labels, theta):
 	var2 = reduce(np.matmul, M)
 	return var1/var2[0, num_pos-1]
 	
-print(p(sentence, labels))
+print(p(sentence, labels, [lamda_in, mu_in]))
+dpdt = grad(p,2)
+print(dpdt(sentence, labels, [lamda_in, mu_in]))
+
 
 def obj_fun(X,Y,T):
 	print("hello")
