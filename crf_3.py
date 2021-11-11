@@ -15,6 +15,8 @@ from functools import reduce
 from conllu.models import TokenList, Token
 from conllu import parse_incr
 import time
+import copy
+from prettytable import PrettyTable
 
 np.random.seed(0)
 data_train_file = open("UD_English-EWT/en_ewt-ud-train.conllu", "r", encoding="utf-8")
@@ -34,8 +36,10 @@ pos = set({})
 pos.add("BOS")
 pos.add("")
 
+num_train = 10000
+num_test = 0
+
 if True:
-	num_train = 1
 	counter = 0
 	for tokenlist in parse_incr(data_train_file):
 		if counter == num_train:
@@ -57,7 +61,6 @@ if True:
 		train_Y.append(Y)
 		counter += 1
 
-	num_test = 0
 	counter = 0
 	for tokenlist in parse_incr(data_test_file):
 		if counter == num_test:
@@ -95,15 +98,44 @@ pos_e = {pos[i]:i for i in range(num_pos)}
 pos_d = {v: k for k, v in pos_e.items()}
 
 # pos to pos
-lamda = np.random.rand(num_pos, num_pos)
+#lamda = np.random.rand(num_pos, num_pos)
 
 # type to pos
-mu = np.random.rand(num_types, num_pos)
+#mu = np.random.rand(num_types, num_pos)
 
 # transitions matrix
 #M = np.random.rand(sent_len, num_pos, num_pos)
 #M = np.zeros((sent_len, num_pos, num_pos))
 
+def print_lamda(pos, l):
+	labels = copy.deepcopy(pos)
+	labels.insert(0, "None")
+	x = PrettyTable(labels)
+	a = [["%.2E" % number for number in l[i]] for i in range(len(l))]
+	[a[i].insert(0,pos[i]) for i in range(len(a))]
+	for row in a:
+		x.add_row(row)
+	print(x)
+
+def print_mu(types, pos, m):
+	labels = copy.deepcopy(pos)
+	labels.insert(0, "None")
+	x = PrettyTable(labels)
+	a = [["%.2E" % number for number in m[i]] for i in range(len(m))]
+	[a[i].insert(0,types[i]) for i in range(len(a))]
+	for row in a:
+		x.add_row(row)
+	print(x)
+
+def print_forward(sentence, pos, forward):
+	labels = copy.deepcopy(pos)
+	labels.insert(0, "None")
+	x = PrettyTable(labels)
+	a = [["%.2E" % number for number in forward[i]] for i in range(len(forward))]
+	[a[i].insert(0,sentence[i]) for i in range(len(a))]
+	for row in a:
+		x.add_row(row)
+	print(x)	
 
 # creates a one-hot vector, where each index corresponds to 
 # "a certain pos y1 followed by a certain pos y2"
@@ -116,63 +148,97 @@ def g(m, x, y2):
 	return m[types_e[x], pos_e[y2]]
 
 def Mi(x, y1, y2, l, m):
-	return np.exp(f(l,y1,y2) + g(m, x, y2))
+	return np.exp(f(l,y1,y2)*g(m, x, y2))
 
 def p(sentence, labels, theta):
 	l = theta[0]
 	m = theta[1]
-	M = np.array([[[Mi(x, y1, y2, l, m) for y2 in pos] for y1 in pos] for x in sentence])
+	M = np.array([[[Mi(x, y1, y2, l, m) for y1 in pos] for y2 in pos] for x in sentence])
+	print(M)
 	var1 = math.prod([ M[i] [pos_e[labels[i-1]]] [pos_e[labels[i]]] for i in range(1, len(sentence))])
 	var2 = reduce(np.matmul, M)
+	print(var2)
 	return var1/var2[0, num_pos-1]
 	
 def obj_fun(sentences, labels, theta):
 	return sum([np.log(p(sentences[i], labels[i], theta)) for i in range(len(sentences))])
 	
-def decode(sentence, lamda, mu):
+def decode2(sentence, lamda, mu):
 	sen_len = len(sentence)
-	M = np.array([[[Mi(x, y1, y2, lamda, mu) for y1 in pos] for y2 in pos] for x in sentence])
-	
+	M = np.array([[[Mi(x, y1, y2, lamda, mu) for y2 in pos] for y1 in pos] for x in sentence])
+	print_lamda(pos,M[1])
+	print(sentence)
+
 	forward = np.zeros((sen_len, num_pos))
 	forward[0][pos_e["BOS"]] = 1
 	for i in range(1, sen_len-1):
 		forward[i] = np.dot(forward[i-1], M[i])
+
+	print_forward(sentence, pos, forward)
 
 	backward = np.zeros((sen_len, num_pos))
 	backward[sen_len-1][pos_e[""]] = 1
 	for i in range(sen_len-2, 0, -1):
 		backward[i] = np.dot(M[i+1], backward[i+1])
 
+	print_forward(sentence, pos, backward)
+
 	prob = np.multiply(forward, backward)
+	print_forward(sentence, pos, prob)
 	result = [pos_d[np.argmax(prob[i])] for i in range(1,sen_len-1)]
 	return result
 
-num_epoch = 100
-for i in range(num_epoch):
-	lamda[pos_e[""]] = np.zeros(num_pos) 		# from "" to anything is zero
-	lamda[:, pos_e["BOS"]] = np.zeros(num_pos) 	# from anything to BOS is zero
 
-	mu[:, pos_e["BOS"]] = np.zeros(num_types) 	# nothing belongs to BOS POS
-	mu[:, pos_e[""]] = np.zeros(num_types)		# nothing belongs to "" POS
-	mu[types_e[""]] = np.zeros(num_pos) 		# "" doesn't belong to any POS
-	mu[types_e[""], pos_e[""]] = 1 				# except ""
-	mu[types_e["BOS"]] = np.zeros(num_pos)      # BOS doesn't belong to any POS
-	mu[types_e["BOS"], pos_e["BOS"]] = 1 		# except BOS
 
-	theta = [lamda, mu]
-	#print(mu)
-	#obj_fun(train_X, train_Y, theta)
-	dodt = grad(obj_fun,2)
-	dT = dodt(train_X, train_Y, theta)
-	lamda = np.add(theta[0], 0.1*dT[0])
-	mu = np.add(theta[1], 0.1*dT[1])
-	#continue
-	actual = train_Y[0][1:-1]
-	predicted = decode(train_X[0], lamda, mu)
-	accuracy = sum([1 if actual[i] == predicted[i] else 0 for i in range(0,len(predicted))])/len(predicted)
-	#print("actual:", actual)
-	print("predicted:", predicted)
-	print("accuracy:", accuracy)
+lamda = np.zeros((num_pos,num_pos))
+mu = np.zeros((num_types,num_pos))
+
+for j in range(len(train_X)):
+	x = train_X[j]
+	y = train_Y[j]
+	for i in range(len(x)):
+		if i == 0:
+			continue
+		lamda[pos_e[y[i-1]]][pos_e[y[i]]] += 1
+		mu[types_e[x[i]]][pos_e[y[i]]] += 1
+
+print_lamda(pos,lamda)
+print_mu(types,pos,mu)
+
+actual = train_Y[0][1:-1]
+predicted = decode2(train_X[0], lamda, mu)
+accuracy = sum([1 if actual[i] == predicted[i] else 0 for i in range(0,len(predicted))])/len(predicted)
+print("actual:", actual)
+print("predicted:", predicted)
+print("accuracy:", accuracy)
+
+
+# num_epoch = 100
+# for i in range(num_epoch):
+# 	lamda[pos_e[""]] = np.zeros(num_pos) 		# from "" to anything is zero
+# 	lamda[:, pos_e["BOS"]] = np.zeros(num_pos) 	# from anything to BOS is zero
+
+# 	mu[:, pos_e["BOS"]] = np.zeros(num_types) 	# nothing belongs to BOS POS
+# 	mu[:, pos_e[""]] = np.zeros(num_types)		# nothing belongs to "" POS
+# 	mu[types_e[""]] = np.zeros(num_pos) 		# "" doesn't belong to any POS
+# 	mu[types_e[""], pos_e[""]] = 1 				# except ""
+# 	mu[types_e["BOS"]] = np.zeros(num_pos)      # BOS doesn't belong to any POS
+# 	mu[types_e["BOS"], pos_e["BOS"]] = 1 		# except BOS
+
+# 	theta = [lamda, mu]
+# 	#print(mu)
+# 	#obj_fun(train_X, train_Y, theta)
+# 	dodt = grad(obj_fun,2)
+# 	dT = dodt(train_X, train_Y, theta)
+# 	lamda = np.add(theta[0], 0.1*dT[0])
+# 	mu = np.add(theta[1], n0.1*dT[1])
+# 	#continue
+# 	actual = train_Y[0][1:-1]
+# 	predicted = decode(train_X[0], lamda, mu)
+# 	accuracy = sum([1 if actual[i] == predicted[i] else 0 for i in range(0,len(predicted))])/len(predicted)
+# 	#print("actual:", actual)
+# 	print("predicted:", predicted)
+# 	print("accuracy:", accuracy)
 
 	
 	
