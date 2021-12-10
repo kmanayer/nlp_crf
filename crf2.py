@@ -297,13 +297,6 @@ for i in range(num_epoch):
 	print(time.time() - start, " secs for ", num_train, " training, and ", num_test, " dev")
 	#pretty_print(pos,lamda)
 
-	actual = flatten([test_Y[i][1:-1] for i in range(num_test)])
-	predicted = flatten([decode(test_X[i], lamda, mu) for i in range(num_test)])
-	print_scores("test", actual, predicted)
-
-	inspect_lamda(lamda,20)
-	inspect_mu(mu,20)
-
 if testing:
 	file_name = sys.argv[2]
 	output_file = open(file_name, "rb")
