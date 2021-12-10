@@ -1,0 +1,43 @@
+From, To, POS, Word
+PUNCT, EOS, (period), PUNCT
+BOS, PRON,and, CCONJ
+ADJ, NOUN, the, DET
+BOS, DET, (comma), PUNCT
+BOS, PROPN, a, DET
+PROPN, PROPN, to, PART
+VERB, PRON, in, ADP
+DET, NOUN, n't, PART
+NUM, NOUN, are, AUX
+VERB, ADP, was, AUX
+BOS, NUM, of, ADP
+VERB, DET, is, AUX
+NOUN, ADP, The, DET
+VERB, SCONJ, on, ADP
+ADP, PROPN, them, PRON
+PRON, AUX, they, PRON
+NOUN, SCONJ, that, SCONJ
+VERB, ADV, his, PRON
+PUNCT, PROPN, (hyphen), PUNCT
+BOS, NOUN, an, DET
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

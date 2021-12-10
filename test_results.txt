@@ -1,0 +1,4 @@
+model, accuracy, precision, recall, F1
+Baseline, 0.242, 0.132, 0.242, 0.166
+Original, 0.505, 0.606, 0.505, 0.500
+Modified, 0.453, 0.469, 0.453, 0.435

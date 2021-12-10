@@ -1,27 +1,71 @@
-import math, time, sys, pickle
+import math, time, sys, pickle, string
 import autograd.numpy as np
 from autograd import grad
 from functools import reduce
 from conllu.models import TokenList, Token
 from conllu import parse_incr
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from prettytable import PrettyTable
 
+def pretty_print(pos, lamda):
+	labels = copy.deepcopy(pos)
+	labels.insert(0, "")
+	x = PrettyTable(labels)
+	a = [["%.2f" % number for number in lamda[i]] for i in range(len(lamda))]
+	[a[i].insert(0,pos[i]) for i in range(len(a))]
+	#lamda = np.insert(lamda,0,pos, axis=1 )
+	for row in a:
+		x.add_row(row)
+	print(x)
 
-# likelihood of "a certain pos y1 followed by a certain pos y2"
+def word2features(word):
+	result = np.zeros(num_types)
+	result[2] = 1 if word[0].isdigit() else 0
+	result[3] = 1 if word[0].isupper() else 0
+	result[4] = 1 if '-' in word else 0
+	result[5] = 1 if word in string.punctuation else 0
+	result[6] = 1 if word[-3:].lower()=="ogy" else 0
+	result[7] = 1 if word[-2:].lower()=="ed" else 0
+	result[8] = 1 if word[-1:].lower()=="s" else 0
+	result[9] = 1 if word[-2:].lower()=="ly" else 0
+	result[10] = 1 if word[-3:].lower()=="ion" else 0
+	result[11] = 1 if word[-4:].lower()=="tion" else 0
+	result[12] = 1 if word[-3:].lower()=="ity" else 0
+	result[13] = 1 if word[-3:].lower()=="ies" else 0
+	result[14] = 1 if word[-3:].lower()=="ing" else 0
+	return result
+
+def print_scores(label, true, pred):
+	acc = accuracy_score(true, pred)
+	macro_p = precision_score(true, pred, average="weighted", zero_division=0)
+	macro_r = recall_score(true, pred, average="weighted", zero_division=0)
+	macro_f1 = f1_score(true, pred, average="weighted", zero_division=0)
+	graph_file.write("{0:.3f}, {1:.3f}, {2:.3f}, {3:.3f}, ".format(acc, macro_p, macro_r, macro_f1))
+	print("------------------------------------------------")
+	print("The model evaluated on the " + label.upper() + " dataset")
+	print("                Accuracy: %1.3f" % acc)
+	print("Weighted Macro Precision: %1.3f" % (macro_p))
+	print("   Weighted Macro Recall: %1.3f" % (macro_r))
+	print("       Weighted Macro F1: %1.3f" % (macro_f1))
+	print("------------------------------------------------")
+	
+def flatten(l):
+	return sum(l, [])
+
 def f(l, y1, y2):
 	return l[pos_e[y1], pos_e[y2]]
 	
-# likelihood of "a certain type x being of a certain pos y"
 def g(m, x, y2):
-	return m[types_e[x], pos_e[y2]]
+	return np.dot(x,m[:,pos_e[y2]])
+	#a = np.matmul(x, m)
+	#return a[pos_e[y2]]
 
-# returns one entry of one frame in the overall M matrix
 def Mi(x, y1, y2, l, m):
 	return np.exp(f(l,y1,y2) + g(m, x, y2))
 
 def p(sentence, labels, theta):
-	l = theta[0] # lambda
-	m = theta[1] # mu
+	l = theta[0]
+	m = theta[1]
 	M = np.array([[[Mi(x, y1, y2, l, m) for y2 in pos] for y1 in pos] for x in sentence])
 	var1 = math.prod([ M[i] [pos_e[labels[i-1]]] [pos_e[labels[i]]] for i in range(1, len(sentence))])
 	var2 = reduce(np.matmul, M)
@@ -40,16 +84,13 @@ def decode(sentence, lamda, mu):
 		forward[i] = np.dot(forward[i-1], M[i])
 
 	backward = np.zeros((sen_len, num_pos))
-	backward[sen_len-1][pos_e[""]] = 1
+	backward[sen_len-1][pos_e["EOS"]] = 1
 	for i in range(sen_len-2, 0, -1):
 		backward[i] = np.dot(M[i+1], backward[i+1])
 
 	prob = np.multiply(forward, backward)
 	result = [pos_d[np.argmax(prob[i])] for i in range(1,sen_len-1)]
 	return result
-	
-def flatten(l):
-	return sum(l, [])
 
 def inspect_lamda(l,c):
 	result = ""
@@ -83,20 +124,6 @@ def inspect_mu(m,c):
 		result += w + ", " + p + ", " + "{0:.3f},\n".format(mf[i])
 	print(result)
 
-def print_scores(label, true, pred):
-	acc = accuracy_score(true, pred)
-	macro_p = precision_score(true, pred, average="weighted", zero_division=0)
-	macro_r = recall_score(true, pred, average="weighted", zero_division=0)
-	macro_f1 = f1_score(true, pred, average="weighted", zero_division=0)
-	graph_file.write("{0:.3f}, {1:.3f}, {2:.3f}, {3:.3f}, ".format(acc, macro_p, macro_r, macro_f1))
-	print("------------------------------------------------")
-	print("The model evaluated on the " + label.upper() + " dataset")
-	print("                Accuracy: %1.3f" % acc)
-	print("Weighted Macro Precision: %1.3f" % (macro_p))
-	print("   Weighted Macro Recall: %1.3f" % (macro_r))
-	print("       Weighted Macro F1: %1.3f" % (macro_f1))
-	print("------------------------------------------------")
-
 np.random.seed(0)
 data_train_file = open("UD_English-EWT/en_ewt-ud-train.conllu", "r", encoding="utf-8")
 data_dev_file = open("UD_English-EWT/en_ewt-ud-dev.conllu", "r", encoding="utf-8")
@@ -109,15 +136,35 @@ dev_Y = []
 test_X = []
 test_Y = []
 
-types = set({})
-types.add("BOS")
-types.add("")
+num_types = 15 # means number of features including bos and eos
+
+types_d ={	0: 'BOS', 
+			1: 'EOS', 
+			2: 'number', 
+			3: 'upper', 
+			4: 'hyphen', 
+			5: 'punct', 
+			6: '-ogy', 
+			7: '-ed', 
+			8: '-s', 
+			9: '-ly', 
+			10: '-ion', 
+			11: '-tion', 
+			12: '-ity', 
+			13: '-ies', 
+			14: '-ing'}
 
 pos = set({})
 pos.add("BOS")
-pos.add("")
+pos.add("EOS")
 
-num_train = 50
+bos = np.zeros(num_types)
+bos[0]=1
+
+eos = np.zeros(num_types)
+eos[1]=1
+
+num_train = 51
 num_dev = 5
 num_test = 5
 
@@ -127,17 +174,17 @@ for tokenlist in parse_incr(data_train_file):
 		break
 	X = []
 	Y = []
-	X.append("BOS")
+	X.append(bos)
 	Y.append("BOS")
 	for token in tokenlist:
 		word = token['form']
 		part = token['upostag']
-		X.append(word)
+		features = word2features(word)
+		X.append(features)
 		Y.append(part)
-		types.add(word)
 		pos.add(part)
-	X.append("")
-	Y.append("")
+	X.append(eos)
+	Y.append("EOS")
 	train_X.append(X)
 	train_Y.append(Y)
 	counter += 1
@@ -148,17 +195,17 @@ for tokenlist in parse_incr(data_dev_file):
 		break
 	X = []
 	Y = []
-	X.append("BOS")
+	X.append(bos)
 	Y.append("BOS")
 	for token in tokenlist:
 		word = token['form']
 		part = token['upostag']
-		X.append(word)
+		features = word2features(word)
+		X.append(features)
 		Y.append(part)
-		types.add(word)
 		pos.add(part)
-	X.append("")
-	Y.append("")
+	X.append(eos)
+	Y.append("EOS")
 	dev_X.append(X)
 	dev_Y.append(Y)
 	counter += 1
@@ -169,33 +216,29 @@ for tokenlist in parse_incr(data_test_file):
 		break
 	X = []
 	Y = []
-	X.append("BOS")
+	X.append(bos)
 	Y.append("BOS")
 	for token in tokenlist:
 		word = token['form']
 		part = token['upostag']
-		X.append(word)
+		features = word2features(word)
+		X.append(features)
 		Y.append(part)
-		types.add(word)
 		pos.add(part)
-	X.append("")
-	Y.append("")
+	X.append(eos)
+	Y.append("EOS")
 	test_X.append(X)
 	test_Y.append(Y)
 	counter += 1
-	
-types = list(types)
+
 pos = list(pos)
-num_types = len(types)
 num_pos = len(pos)
 
-# encoders and decoders
-types_e = {types[i]:i for i in range(num_types)}
-types_d = {v: k for k, v in types_e.items()}
+# encoder and decoder
 pos_e = {pos[i]:i for i in range(num_pos)}
 pos_d = {v: k for k, v in pos_e.items()}
 
-# pos to pos, misspelled on purpose since lambda is a keyword
+# pos to pos
 lamda = np.random.rand(num_pos, num_pos)
 
 # type to pos
@@ -211,32 +254,28 @@ if len(sys.argv) == 4 and sys.argv[1] == "inspect":
 
 dodt = grad(obj_fun,2)
 
-file_name = "crf_" + str(num_train) + ".model"
-graph_file_name = "crf_" + str(num_train) + ".graph"
+file_name = "crf2_" + str(num_train) + ".model"
+graph_file_name = "crf2_" + str(num_train) + ".graph"
 graph_file = open(graph_file_name, "w")
 
 #lr = 1/num_train
-lr = 0.01
-num_epoch = 1000
+lr = 0.1
+num_epoch = 100
 for i in range(num_epoch):
 	if testing or inspect:
 		break;
 	start = time.time()
-	lamda[pos_e[""]] = np.zeros(num_pos) 		# from "" to anything is zero
+	lamda[pos_e["EOS"]] = np.zeros(num_pos) 	# from EOS to anything is zero
 	lamda[:, pos_e["BOS"]] = np.zeros(num_pos) 	# from anything to BOS is zero
 
 	mu[:, pos_e["BOS"]] = np.zeros(num_types) 	# nothing belongs to BOS POS
-	mu[:, pos_e[""]] = np.zeros(num_types)		# nothing belongs to "" POS
-	mu[types_e[""]] = np.zeros(num_pos) 		# "" doesn't belong to any POS
-	mu[types_e[""], pos_e[""]] = 1 				# except ""
-	mu[types_e["BOS"]] = np.zeros(num_pos)      # BOS doesn't belong to any POS
-	mu[types_e["BOS"], pos_e["BOS"]] = 1 		# except BOS
+	mu[:, pos_e["EOS"]] = np.zeros(num_types)	# nothing belongs to EOS POS
 
 	theta = [lamda, mu]
 	llh = obj_fun(train_X, train_Y, theta)
 	dT = dodt(train_X, train_Y, theta)
-	lamda = np.add(theta[0], lr*dT[0])
-	mu = np.add(theta[1], lr*dT[1])
+	lamda = np.add(theta[0], 0.05*dT[0])
+	mu = np.add(theta[1], 0.05*dT[1])
 	
 	print("epoch ", i+1, ", log-likelihood:", llh)
 	graph_file.write("{0:3}, {1:.3f}, ".format(i, llh))
@@ -248,27 +287,32 @@ for i in range(num_epoch):
 	actual = flatten([dev_Y[i][1:-1] for i in range(num_dev)])
 	predicted = flatten([decode(dev_X[i], lamda, mu) for i in range(num_dev)])
 	print_scores("dev", actual, predicted)
-
+	
 	graph_file.write("\n")
 	graph_file.flush()
 
 	output_file = open(file_name, "wb")
-	pickle.dump([lamda, mu, types, pos, types_e, pos_e, types_d, pos_d], output_file)
+	pickle.dump([lamda, mu, pos, pos_e, pos_d], output_file)
 
-	print(time.time() - start, " secs for ", num_train, " training, and ", num_dev, " dev")
-	
+	print(time.time() - start, " secs for ", num_train, " training, and ", num_test, " dev")
+	#pretty_print(pos,lamda)
+
+	actual = flatten([test_Y[i][1:-1] for i in range(num_test)])
+	predicted = flatten([decode(test_X[i], lamda, mu) for i in range(num_test)])
+	print_scores("test", actual, predicted)
+
+	inspect_lamda(lamda,20)
+	inspect_mu(mu,20)
+
 if testing:
 	file_name = sys.argv[2]
 	output_file = open(file_name, "rb")
 	model = pickle.load(output_file)
 	lamda = model[0]
 	mu = model[1]
-	types = model[2]
-	pos = model[3]
-	types_e = model[4]
-	pos_e = model[5]
-	types_d = model[6]
-	pos_d = model[7]
+	pos = model[2]
+	pos_e = model[3]
+	pos_d = model[4]
 	actual = flatten([test_Y[i][1:-1] for i in range(num_test)])
 	predicted = flatten([decode(test_X[i], lamda, mu) for i in range(num_test)])
 	print_scores("test", actual, predicted)
@@ -280,12 +324,9 @@ if inspect:
 	model = pickle.load(output_file)
 	lamda = model[0]
 	mu = model[1]
-	types = model[2]
-	pos = model[3]
-	types_e = model[4]
-	pos_e = model[5]
-	types_d = model[6]
-	pos_d = model[7]
+	pos = model[2]
+	pos_e = model[3]
+	pos_d = model[4]
 	inspect_lamda(lamda,num_to_inspect)
 	inspect_mu(mu,num_to_inspect)
-
+	
